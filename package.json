@@ -1,0 +1,48 @@
+{
+  "name": "vite-plugin-prerender-spa",
+  "version": "0.1.0",
+  "description": "A Vite plugin for pre-rendering single-page applications",
+  "keywords": [
+    "prerender",
+    "spa",
+    "ssg",
+    "ssr",
+    "vite",
+    "vite-plugin"
+  ],
+  "homepage": "https://github.com/silenaker/vite-plugin-prerender-spa#readme",
+  "bugs": {
+    "url": "https://github.com/silenaker/vite-plugin-prerender-spa/issues"
+  },
+  "license": "MIT",
+  "author": "silenaker",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/silenaker/vite-plugin-prerender-spa.git"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "magic-string": "^1.4.1",
+    "parse5": "^8.0.1"
+  },
+  "devDependencies": {
+    "@types/estree": "^1.0.9",
+    "@types/node": "^22.20.3",
+    "typescript": "^6.0.3"
+  },
+  "peerDependencies": {
+    "vite": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
