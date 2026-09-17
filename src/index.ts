@@ -373,11 +373,14 @@ export default function prerender(options: PrerenderOptions): Plugin {
     apply: "build",
     config(config) {
       userConfig = config;
+      return {
+        build: {
+          manifest: typeof config.build?.manifest === "string" ? config.build.manifest : true,
+        },
+      };
     },
     configResolved(config) {
       resolvedConfig = config;
-      config.build.manifest =
-        typeof config.build.manifest === "string" ? config.build.manifest : true;
     },
     async closeBundle() {
       if (options.routes.length === 0) {
@@ -395,10 +398,12 @@ export default function prerender(options: PrerenderOptions): Plugin {
 
       const outDir = path.resolve(rootDir, resolvedConfig.build.outDir);
       const builtHtml = await fs.readFile(path.join(outDir, "index.html"), "utf8");
-      const manifestPath =
+      const manifestPath = path.join(
+        outDir,
         typeof resolvedConfig.build.manifest === "string"
           ? resolvedConfig.build.manifest
-          : path.join(outDir, ".vite/manifest.json");
+          : ".vite/manifest.json",
+      );
       const manifest: Manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
       const containerId = options.containerId ?? "root";
       const renderer: SsrRenderer = await import(`${path.join(outDir, ".prerender/renderer.js")}`);
