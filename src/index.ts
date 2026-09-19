@@ -484,7 +484,15 @@ export default function prerender(options: PrerenderOptions): Plugin {
 
       await Promise.all(
         options.routes.map(async (route) => {
-          const { appHtml, dynImports } = await renderer.render(route);
+          let appHtml: string;
+          let dynImports: string[];
+          try {
+            ({ appHtml, dynImports } = await renderer.render(route));
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            this.warn(`Failed to render route "${route}": ${message}`);
+            return;
+          }
           const preloadLinks = renderPreloadLinks(dynImports, manifest, resolvedConfig.base);
           const html = genHtml(builtHtml, appHtml, preloadLinks, containerId);
           const filePath = path.join(outDir, route === "/" ? "index.html" : `${route}.html`);
