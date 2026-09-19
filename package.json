@@ -1,14 +1,19 @@
 {
   "name": "vite-plugin-prerender-spa",
-  "version": "0.1.0",
-  "description": "A Vite plugin for pre-rendering single-page applications",
+  "version": "0.1.1",
+  "description": "Vite plugin to pre-render SPA routes into static HTML at build time while emitting accurate asset preloads for lazy imports the rendered routes actually trigger",
   "keywords": [
-    "prerender",
-    "spa",
-    "ssg",
-    "ssr",
     "vite",
-    "vite-plugin"
+    "vite-plugin",
+    "prerender",
+    "pre-render",
+    "preload",
+    "modulepreload",
+    "spa",
+    "ssr",
+    "ssg",
+    "lazy-import",
+    "lazy-load"
   ],
   "homepage": "https://github.com/silenaker/vite-plugin-prerender-spa#readme",
   "bugs": {
@@ -26,9 +31,14 @@
     "LICENSE"
   ],
   "type": "module",
-  "main": "dist/index.js",
+  "sideEffects": false,
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "magic-string": "^1.4.1",
@@ -40,7 +50,7 @@
     "typescript": "^6.0.3"
   },
   "peerDependencies": {
-    "vite": "^8.0.0"
+    "vite": "^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0"
   },
   "engines": {
     "node": ">=18"
