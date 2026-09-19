@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path, { extname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import MagicString from "magic-string";
 import * as parse5 from "parse5";
@@ -18,6 +19,8 @@ import type {
 
 type P5Node = DefaultTreeAdapterMap["node"];
 type P5Element = DefaultTreeAdapterMap["element"];
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function normalizePath(p: string): string {
   return path.normalize(p).replaceAll("\\", "/");
@@ -157,7 +160,7 @@ function createSsrBuildPlugin(options: {
         return null;
       }
 
-      const dynImport = `import { __dynImport } from "${path.join(import.meta.dirname, "dyn-import-collector")}";`;
+      const dynImport = `import { __dynImport } from "${path.join(__dirname, "dyn-import-collector")}";`;
       let transformed = code;
       for (const edit of edits.toReversed()) {
         transformed = transformed.slice(0, edit.start) + edit.content + transformed.slice(edit.end);
@@ -472,7 +475,7 @@ export default function prerender(options: PrerenderOptions): Plugin {
         userConfig,
         resolvedConfig,
         plugin,
-        path.join(import.meta.dirname, "renderer"),
+        path.join(__dirname, "renderer"),
         options.renderer ?? "src/entry-server",
         manifest,
         ssrManifest,
