@@ -46,18 +46,35 @@ function walkESTree(node: ESTreeNode, visit: (node: ESTreeNode) => void) {
   }
 }
 
-function createSsrBuildPlugin(): Plugin {
+function createSsrBuildPlugin(options: {
+  manifest: Manifest;
+  ssrManifest: Record<string, string[]>;
+}): Plugin {
+  const { manifest, ssrManifest } = options;
   let resolvedConfig: ResolvedConfig;
+  let entryUrl: string;
 
   return {
     name: "prerender:ssr-build",
     enforce: "post",
     configResolved(config) {
       resolvedConfig = config;
+      entryUrl = toAssetUrl(
+        Object.values(manifest).find((chunk) => chunk.isEntry)!.file,
+        config.base,
+      );
     },
     async transform(code, id) {
       const imports: ImportExpression[] = [];
       const edits: Array<{ start: number; end: number; content: string }> = [];
+
+      const importer = path.isAbsolute(id)
+        ? normalizePath(path.relative(resolvedConfig.root, id))
+        : id;
+      let importerUrl = ssrManifest[importer]?.find((url) => url.split("?")[0]!.endsWith(".js"));
+      if (!importerUrl && ssrManifest[importer]) {
+        importerUrl = entryUrl;
+      }
 
       walkESTree(this.parse(code) as ESTreeNode, (node) => {
         if (node.type === "ImportExpression") {
@@ -65,29 +82,75 @@ function createSsrBuildPlugin(): Plugin {
         }
       });
 
-      for (const node of imports) {
+      const getCodeRange = (node: ESTreeNode) => {
         const hasStart = "start" in node && typeof node.start === "number";
         const hasEnd = "end" in node && typeof node.end === "number";
-        const range =
-          node.range ?? (hasStart && hasEnd ? [node.start as number, node.end as number] : null);
+        return (
+          node.range ?? (hasStart && hasEnd ? [node.start as number, node.end as number] : null)
+        );
+      };
 
-        if (!range) continue;
+      for (const node of imports) {
+        const importRange = getCodeRange(node);
+        if (!importRange) continue;
         const source = node.source;
+
+        let moduleId: string;
+        let external = false;
+
         if (isESTreeStringLiteral(source)) {
-          const resolved = await this.resolve(source.value, id, {
-            kind: "dynamic-import",
-          });
+          const resolved = await this.resolve(source.value, id, { kind: "dynamic-import" });
+          if (!resolved) continue;
           const rootDir = resolvedConfig.root;
-          const moduleId = normalizePath(
-            resolved?.id ? path.relative(rootDir, resolved.id) : source.value,
-          );
-          const originalImport = code.slice(range[0], range[1]);
-          edits.push({
-            start: range[0],
-            end: range[1],
-            content: `__dynImport(${JSON.stringify(moduleId)}, () => ${originalImport})`,
-          });
+
+          // For external import resolution with default behavior,
+          // `makeAbsoluteExternalsRelative` has different effects for relative and
+          // absolute source imports:
+          // - Relative: `true` resolves to an absolute ID and rewrites it to a path
+          //   relative to the entry module in the output; `false` resolves to the source
+          //   relative import as the module ID and preserves it verbatim in the output.
+          //   When unset, it behaves like `true`.
+          // - Absolute: both cases resolve to the source absolute import as the module
+          //   ID; `true` rewrites it as in the relative source import case, while
+          //   with `external` is `'absolute'` preserves it as an absolute path.
+          //   When unset, it behaves like `false`.
+          // We only handle verbatim copied case currently
+          if (
+            (resolved.external === true && resolved.id.match(/^(\.\.?\/|https?:\/\/)/)) ||
+            (resolved.external === "absolute" && resolved.id.match(/^\//))
+          ) {
+            moduleId = resolved.id;
+            external = true;
+          } else if (resolved.external === false) {
+            moduleId = path.isAbsolute(resolved.id)
+              ? normalizePath(path.relative(rootDir, resolved.id))
+              : resolved.id;
+          } else {
+            continue;
+          }
+        } else {
+          const sourceRange = getCodeRange(source);
+          if (!sourceRange) continue;
+          moduleId = code.slice(sourceRange[0], sourceRange[1]);
+          external = true;
         }
+
+        const originalImport = code.slice(importRange[0], importRange[1]);
+        const options = JSON.stringify(
+          external
+            ? {
+                moduleId,
+                external,
+                importerUrl,
+              }
+            : moduleId,
+        );
+
+        edits.push({
+          start: importRange[0],
+          end: importRange[1],
+          content: `__dynImport(() => ${originalImport}, ${options})`,
+        });
       }
 
       if (edits.length === 0) {
@@ -105,7 +168,9 @@ function createSsrBuildPlugin(): Plugin {
 }
 
 function toAssetUrl(file: string, base: string): string {
-  return normalizePath(path.join(base, file));
+  const baseUrl = new URL(base, "http://_");
+  const assetUrl = new URL(path.posix.join(baseUrl.pathname, file), baseUrl);
+  return base.startsWith("/") ? assetUrl.href.replace(/^http:\/\/_/, "") : assetUrl.href;
 }
 
 type AssetType = "js" | "css" | "font" | "image" | "other";
@@ -183,18 +248,7 @@ function renderPreloadLinks(modules: string[], manifest: Manifest, base: string)
   }
 
   const entryChunkDeps = getDepChunks([entryChunk], depGraph);
-  const preloadChunks = getDepChunks(
-    modules.map((id) => {
-      if (id.startsWith("./")) {
-        id = id.slice(2);
-      } else if (id.startsWith(base)) {
-        id = normalizePath(path.relative(base, id));
-      }
-      if (manifest[id]) return manifest[id]!;
-      return chunks.find((chunk) => chunk.file === id)!;
-    }),
-    depGraph,
-  );
+  const preloadChunks = getDepChunks(modules.map((id) => manifest[id]!).filter(Boolean), depGraph);
 
   const assets = Object.fromEntries(
     ASSET_ORDER.map((item) => [item, []] as [AssetType, string[]]),
@@ -215,6 +269,9 @@ function renderPreloadLinks(modules: string[], manifest: Manifest, base: string)
       }
     }
   }
+
+  // externals
+  assets.js.push(...modules.filter((id) => !manifest[id]));
 
   const links: string[] = [];
   for (const type of ASSET_ORDER) {
@@ -324,6 +381,8 @@ async function createSsrBundle(
   currentPlugin: Plugin,
   entry: string,
   ssrRenderer: string,
+  manifest: Manifest,
+  ssrManifest: Record<string, string[]>,
 ): Promise<void> {
   const config: InlineConfig = mergeConfig(userConfig, {
     configFile: false,
@@ -341,7 +400,7 @@ async function createSsrBundle(
 
   config.plugins = [
     ...(userConfig.plugins?.filter((plugin) => plugin !== currentPlugin) ?? []),
-    createSsrBuildPlugin(),
+    createSsrBuildPlugin({ manifest, ssrManifest }),
   ];
 
   await build(config);
@@ -376,6 +435,8 @@ export default function prerender(options: PrerenderOptions): Plugin {
       return {
         build: {
           manifest: typeof config.build?.manifest === "string" ? config.build.manifest : true,
+          ssrManifest:
+            typeof config.build?.ssrManifest === "string" ? config.build.ssrManifest : true,
         },
       };
     },
@@ -388,16 +449,8 @@ export default function prerender(options: PrerenderOptions): Plugin {
       }
 
       const rootDir = resolvedConfig.root;
-      await createSsrBundle(
-        userConfig,
-        resolvedConfig,
-        plugin,
-        path.join(import.meta.dirname, "renderer"),
-        options.renderer ?? "src/entry-server",
-      );
-
       const outDir = path.resolve(rootDir, resolvedConfig.build.outDir);
-      const builtHtml = await fs.readFile(path.join(outDir, "index.html"), "utf8");
+
       const manifestPath = path.join(
         outDir,
         typeof resolvedConfig.build.manifest === "string"
@@ -405,6 +458,27 @@ export default function prerender(options: PrerenderOptions): Plugin {
           : ".vite/manifest.json",
       );
       const manifest: Manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+      const ssrManifestPath = path.join(
+        outDir,
+        typeof resolvedConfig.build.ssrManifest === "string"
+          ? resolvedConfig.build.ssrManifest
+          : ".vite/ssr-manifest.json",
+      );
+      const ssrManifest: Record<string, string[]> = JSON.parse(
+        await fs.readFile(ssrManifestPath, "utf8"),
+      );
+
+      await createSsrBundle(
+        userConfig,
+        resolvedConfig,
+        plugin,
+        path.join(import.meta.dirname, "renderer"),
+        options.renderer ?? "src/entry-server",
+        manifest,
+        ssrManifest,
+      );
+
+      const builtHtml = await fs.readFile(path.join(outDir, "index.html"), "utf8");
       const containerId = options.containerId ?? "root";
       const renderer: SsrRenderer = await import(`${path.join(outDir, ".prerender/renderer.js")}`);
 
