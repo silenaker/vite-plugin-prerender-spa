@@ -322,13 +322,13 @@ function isElement(node: P5Node): node is P5Element {
 }
 
 function findElement(root: P5Node, test: (el: P5Element) => boolean): P5Element | null {
-  const stack = [root];
+  const stack: P5Node[] = [root];
   while (stack.length) {
     const node = stack.pop()!;
+    if (isElement(node) && test(node)) return node;
     if ("childNodes" in node) {
-      for (const child of node.childNodes) {
-        if (isElement(child) && test(child)) return child;
-        if ("childNodes" in child) stack.push(child);
+      for (let i = node.childNodes.length - 1; i >= 0; i--) {
+        stack.push(node.childNodes[i]!);
       }
     }
   }

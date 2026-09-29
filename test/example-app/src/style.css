@@ -1,0 +1,38 @@
+:root {
+  font:
+    16px/1.5 system-ui,
+    sans-serif;
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+}
+
+nav {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem 2rem;
+  border-bottom: 1px solid #e5e4e7;
+}
+
+nav a {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+nav a.active {
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+main {
+  max-width: 640px;
+  margin: 4rem auto;
+  padding: 0 1rem;
+}
+
+main h1 {
+  margin: 0 0 0.5rem;
+}

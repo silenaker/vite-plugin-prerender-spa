@@ -9,3 +9,4 @@ coverage/
 .idea/
 *.swp
 .DS_Store
+.tmp

@@ -37,17 +37,20 @@
   },
   "scripts": {
     "build": "tsc",
+    "test": "tsc -p test && vitest run",
+    "test:update": "tsc -p test && UPDATE_EXPECTED=1 vitest run",
     "prepack": "npm run build",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "magic-string": "^1.4.1",
+    "magic-string": "^1.4.2",
     "parse5": "^8.0.1"
   },
   "devDependencies": {
     "@types/estree": "^1.0.9",
-    "@types/node": "^22.20.3",
-    "typescript": "^6.0.3"
+    "@types/node": "^26.6.3",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.2"
   },
   "peerDependencies": {
     "vite": "^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0"

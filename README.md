@@ -10,7 +10,7 @@ After the standard client build completes, the plugin:
 
 1. **Builds an SSR bundle** from your `entry-server` using Vite's `--ssr` mode internally.
 2. **Renders each route** by calling your `render(url)` function exported by `entry-server`, collecting the output HTML along with the dynamic imported chunks and assets during rendering.
-3. **Generates preload links** for the necessary chunks and assets, eliminating the sequential RTT waterfall of lazy-loaded routes.
+3. **Generates preload links** for the chunks a route loaded, their css and then their fonts, eliminating the sequential RTT waterfall of lazy-loaded routes. Images and other assets are not preloaded yet.
 4. **Injects the rendered HTML** into the client build's `index.html` and writes each route to a static `.html` file.
 
 ## Install
