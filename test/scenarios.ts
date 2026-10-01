@@ -131,6 +131,7 @@ export async function render(url: string): Promise<string> {
   {
     name: "options/invalid container id",
     options: { routes: EXAMPLE_ROUTE_PATHS, containerId: "nope" },
+    buildFails: true,
   },
   {
     name: "options/async interleaving routes",
@@ -207,16 +208,16 @@ const SHARED_PAGES: Record<string, string> = {
   return value.toUpperCase();
 }
 `,
-  "src/pages/deep-a.ts": `import { format } from "../shared/format.ts";
+  "src/pages/shared-a.ts": `import { format } from "../shared/format.ts";
 
 export default function render(): string {
-  return format("deep-a");
+  return format("shared-a");
 }
 `,
-  "src/pages/deep-b.ts": `import { format } from "../shared/format.ts";
+  "src/pages/shared-b.ts": `import { format } from "../shared/format.ts";
 
 export default function render(): string {
-  return format("deep-b");
+  return format("shared-b");
 }
 `,
 };
@@ -247,8 +248,8 @@ const specifierScenarios: Scenario[] = [
         "/absent",
         "/builtin",
         "/server-only",
-        "/deep-a",
-        "/deep-b",
+        "/shared-a",
+        "/shared-b",
       ],
     },
     vite: {
@@ -299,8 +300,8 @@ const specifierScenarios: Scenario[] = [
         "/mixed": ["./pages/home", "https://cdn.example.com/lib.js"],
         "/dep": ["parse5"],
         "/absent": ["not-installed-pkg"],
-        "/deep-a": ["./pages/deep-a.ts"],
-        "/deep-b": ["./pages/deep-b.ts"],
+        "/shared-a": ["./pages/shared-a.ts"],
+        "/shared-b": ["./pages/shared-b.ts"],
       }),
       "src/entry-server.ts": `import { render as appRender } from "./app.ts";
 import { renderBuiltin, renderServerOnly } from "./server-only.ts";

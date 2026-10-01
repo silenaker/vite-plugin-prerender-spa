@@ -17,6 +17,8 @@ import type {
   UserConfig,
 } from "vite";
 
+import type { DynImport } from "./dyn-import-collector.ts";
+
 type P5Node = DefaultTreeAdapterMap["node"];
 type P5Element = DefaultTreeAdapterMap["element"];
 
@@ -170,10 +172,19 @@ function createSsrBuildPlugin(options: {
   };
 }
 
+const SENTINEL_ORIGIN = "http://_";
+
 function toAssetUrl(file: string, base: string): string {
-  const baseUrl = new URL(base, "http://_");
+  const baseUrl = new URL(base, SENTINEL_ORIGIN);
   const assetUrl = new URL(path.posix.join(baseUrl.pathname, file), baseUrl);
-  return base.startsWith("/") ? assetUrl.href.replace(/^http:\/\/_/, "") : assetUrl.href;
+
+  if (baseUrl.origin !== SENTINEL_ORIGIN) {
+    return assetUrl.href;
+  }
+  if (base.startsWith("/")) {
+    return assetUrl.href.slice(SENTINEL_ORIGIN.length);
+  }
+  return `.${assetUrl.pathname}`;
 }
 
 type AssetType = "js" | "css" | "font" | "image" | "other";
@@ -233,9 +244,11 @@ function getDepChunks(
   return result;
 }
 
-function renderPreloadLinks(modules: string[], manifest: Manifest, base: string): string {
+function renderPreloadLinks(modules: DynImport[], manifest: Manifest, base: string): string[] {
   const chunks = Object.values(manifest);
   const depGraph: Map<ManifestChunk, ManifestChunk[]> = new Map();
+  const loadedChunks: ManifestChunk[] = [];
+  const externals: string[] = [];
   let entryChunk!: ManifestChunk;
 
   for (const chunk of chunks) {
@@ -250,8 +263,19 @@ function renderPreloadLinks(modules: string[], manifest: Manifest, base: string)
     }
   }
 
+  for (const item of modules) {
+    if (item.external) {
+      externals.push(item.moduleId);
+      continue;
+    }
+    const chunk = manifest[item.moduleId];
+    if (chunk) {
+      loadedChunks.push(chunk);
+    }
+  }
+
   const entryChunkDeps = getDepChunks([entryChunk], depGraph);
-  const preloadChunks = getDepChunks(modules.map((id) => manifest[id]!).filter(Boolean), depGraph);
+  const preloadChunks = getDepChunks(loadedChunks, depGraph);
 
   const assets = Object.fromEntries(
     ASSET_ORDER.map((item) => [item, []] as [AssetType, string[]]),
@@ -273,17 +297,19 @@ function renderPreloadLinks(modules: string[], manifest: Manifest, base: string)
     }
   }
 
-  // externals
-  assets.js.push(...modules.filter((id) => !manifest[id]));
+  assets.js.push(...externals);
 
   const links: string[] = [];
   for (const type of ASSET_ORDER) {
     for (const file of assets[type]) {
-      links.push(renderPreloadLink(file, type));
+      const link = renderPreloadLink(file, type);
+      if (link !== "") {
+        links.push(link);
+      }
     }
   }
 
-  return links.join("\n    ");
+  return links;
 }
 
 function renderPreloadLink(file: string, type: AssetType): string {
@@ -310,7 +336,7 @@ function renderPreloadLink(file: string, type: AssetType): string {
 
 interface RenderResult {
   appHtml: string;
-  dynImports: string[];
+  dynImports: DynImport[];
 }
 
 interface SsrRenderer {
@@ -344,34 +370,94 @@ function getInnerRange(element: P5Element): { start: number; end: number } | nul
   };
 }
 
-function genHtml(
-  builtHtml: string,
-  appHtml: string,
-  preloadLinks: string,
-  containerId: string,
-): string {
-  const doc = parse5.parse(builtHtml, { sourceCodeLocationInfo: true });
-  const s = new MagicString(builtHtml);
+interface HeadInjection {
+  /** The whitespace between the last head child and `</head>` */
+  range: { start: number; end: number };
+  /** Indentation of the head's children */
+  childIndent: string;
+  /** Indentation of the `</head>` line */
+  endIndent: string;
+}
+
+interface PageTemplate {
+  html: string;
+  htmlPath: string;
+  containerRange: { start: number; end: number };
+  head: HeadInjection | null;
+}
+
+function lineIndent(html: string, offset: number): string {
+  const lineStart = html.lastIndexOf("\n", offset - 1) + 1;
+  return html.slice(lineStart, offset).match(/^[ \t]*/)?.[0] ?? "";
+}
+
+function whitespaceBefore(html: string, offset: number): { start: number; end: number } {
+  let start = offset;
+  while (start > 0 && /[ \t\r\n]/.test(html[start - 1]!)) {
+    start -= 1;
+  }
+  return { start, end: offset };
+}
+
+function findHeadInjection(doc: P5Node, html: string): HeadInjection | null {
+  const head = findElement(doc, (el) => el.tagName === "head");
+  const endTag = head?.sourceCodeLocation?.endTag;
+  if (!head || !endTag) return null;
+
+  const children = head.childNodes.filter(isElement);
+  const lastChild = children[children.length - 1];
+  const endIndent = lineIndent(html, endTag.startOffset);
+  const childIndent = lastChild?.sourceCodeLocation
+    ? lineIndent(html, lastChild.sourceCodeLocation.startOffset)
+    : endIndent
+      ? `${endIndent}  `
+      : "";
+
+  return { range: whitespaceBefore(html, endTag.startOffset), childIndent, endIndent };
+}
+
+function createPageTemplate(html: string, htmlPath: string, containerId: string): PageTemplate {
+  const doc = parse5.parse(html, { sourceCodeLocationInfo: true });
 
   const container = findElement(doc, (el) =>
     el.attrs.some((a) => a.name === "id" && a.value === containerId),
   );
-  if (container) {
-    const range = getInnerRange(container);
-    if (range) {
-      if (range.start === range.end) {
-        s.prependRight(range.start, appHtml);
-      } else {
-        s.overwrite(range.start, range.end, appHtml);
-      }
-    }
+  if (!container) {
+    throw new Error(`Cannot find the prerender container "#${containerId}" in ${htmlPath}`);
   }
 
-  if (preloadLinks) {
-    const head = findElement(doc, (el) => el.tagName === "head");
-    const endTag = head?.sourceCodeLocation?.endTag;
-    if (endTag) {
-      s.appendLeft(endTag.startOffset, `  ${preloadLinks}\n`);
+  const containerRange = getInnerRange(container);
+  if (!containerRange) {
+    throw new Error(
+      `Cannot locate the content of the prerender container "#${containerId}" in ${htmlPath}`,
+    );
+  }
+
+  return { html, htmlPath, containerRange, head: findHeadInjection(doc, html) };
+}
+
+function genHtml(template: PageTemplate, appHtml: string, preloadLinks: string[]): string {
+  const s = new MagicString(template.html);
+
+  const { start, end } = template.containerRange;
+  if (start === end) {
+    s.prependRight(start, appHtml);
+  } else {
+    s.overwrite(start, end, appHtml);
+  }
+
+  if (preloadLinks.length > 0) {
+    const head = template.head;
+    if (!head) {
+      throw new Error(`Cannot inject preload links: ${template.htmlPath} has no </head>`);
+    }
+    const lf = head.childIndent ? "\n" : "";
+    const links = preloadLinks.map((link) => `${head.childIndent}${link}`).join(lf);
+    const block = `${lf}${links}${head.endIndent ? "\n" : ""}${head.endIndent}`;
+    if (head.range.start === head.range.end) {
+      s.appendRight(head.range.start, block);
+    } else {
+      s.overwrite(head.range.start, head.range.end, block);
     }
   }
 
@@ -481,14 +567,15 @@ export default function prerender(options: PrerenderOptions): Plugin {
         ssrManifest,
       );
 
-      const builtHtml = await fs.readFile(path.join(outDir, "index.html"), "utf8");
-      const containerId = options.containerId ?? "root";
+      const htmlPath = path.join(outDir, "index.html");
+      const builtHtml = await fs.readFile(htmlPath, "utf8");
+      const template = createPageTemplate(builtHtml, htmlPath, options.containerId ?? "root");
       const renderer: SsrRenderer = await import(`${path.join(outDir, ".prerender/renderer.js")}`);
 
       await Promise.all(
         options.routes.map(async (route) => {
           let appHtml: string;
-          let dynImports: string[];
+          let dynImports: DynImport[];
           try {
             ({ appHtml, dynImports } = await renderer.render(route));
           } catch (err) {
@@ -497,7 +584,7 @@ export default function prerender(options: PrerenderOptions): Plugin {
             return;
           }
           const preloadLinks = renderPreloadLinks(dynImports, manifest, resolvedConfig.base);
-          const html = genHtml(builtHtml, appHtml, preloadLinks, containerId);
+          const html = genHtml(template, appHtml, preloadLinks);
           const filePath = path.join(outDir, route === "/" ? "index.html" : `${route}.html`);
 
           await fs.mkdir(path.dirname(filePath), { recursive: true });

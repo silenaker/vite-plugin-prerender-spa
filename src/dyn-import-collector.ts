@@ -1,40 +1,41 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import path from "node:path/posix";
 
+export interface DynImport {
+  moduleId: string;
+  external: boolean;
+}
+
 export interface DynImportCollector {
-  add(moduleId: string): void;
-  getModules(): string[];
+  add(dynImport: DynImport): void;
+  getImports(): DynImport[];
 }
 
 export function createDynImportCollector(): DynImportCollector {
-  const modules: string[] = [];
+  const imports = new Map<string, DynImport>();
 
   return {
-    add(moduleId: string) {
-      if (!modules.includes(moduleId)) {
-        modules.push(moduleId);
+    add(dynImport) {
+      if (!imports.has(dynImport.moduleId)) {
+        imports.set(dynImport.moduleId, dynImport);
       }
     },
-    getModules() {
-      return [...modules];
+    getImports() {
+      return [...imports.values()];
     },
   };
 }
 
-let currentCollector: DynImportCollector | undefined;
+const collectorStorage = new AsyncLocalStorage<DynImportCollector>();
 
 export async function withDynImportCollector<T>(
   collector: DynImportCollector,
   render: () => T | Promise<T>,
 ): Promise<T> {
-  const previousCollector = currentCollector;
-  currentCollector = collector;
-
-  try {
-    return await render();
-  } finally {
-    currentCollector = previousCollector;
-  }
+  return collectorStorage.run(collector, () => render());
 }
+
+const SENTINEL_ORIGIN = "http://_";
 
 export function __dynImport<T>(
   loader: () => Promise<T>,
@@ -61,16 +62,16 @@ export function __dynImport<T>(
       if (!moduleId.match(/^(\/|\.\.?\/|https?:\/\/)/)) return;
       if (moduleId.match(/^\.\.?\//)) {
         if (!importerUrl) return;
-        const url = new URL(importerUrl, "http://_");
+        const url = new URL(importerUrl, SENTINEL_ORIGIN);
         const dirPath = path.dirname(path.normalize(url.pathname));
         const moduleUrl = new URL(path.join(dirPath, moduleId), url.origin);
 
-        moduleId = importerUrl.startsWith("/")
-          ? moduleUrl.href.replace(/^http:\/\/_/, "")
-          : moduleUrl.href;
+        moduleId = importerUrl.startsWith("./")
+          ? `.${moduleUrl.pathname}`
+          : moduleUrl.href.replace(SENTINEL_ORIGIN, "");
       }
     }
-    currentCollector?.add(moduleId);
+    collectorStorage.getStore()?.add({ moduleId, external: !!external });
   };
 
   collect();
