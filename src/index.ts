@@ -57,6 +57,7 @@ function createSsrBuildPlugin(options: {
 }): Plugin {
   const { manifest, ssrManifest } = options;
   let resolvedConfig: ResolvedConfig;
+  let resolveClient!: ReturnType<ResolvedConfig["createResolver"]>;
   let entryUrl: string;
 
   return {
@@ -64,6 +65,7 @@ function createSsrBuildPlugin(options: {
     enforce: "post",
     configResolved(config) {
       resolvedConfig = config;
+      resolveClient = config.createResolver();
       entryUrl = toAssetUrl(
         Object.values(manifest).find((chunk) => chunk.isEntry)!.file,
         config.base,
@@ -126,6 +128,15 @@ function createSsrBuildPlugin(options: {
           ) {
             moduleId = resolved.id;
             external = true;
+          } else if (
+            resolved.external === true &&
+            !source.value.match(/^(node:|[./]|[a-zA-Z][a-zA-Z\d+.-]*:)/)
+          ) {
+            const clientResolved = await resolveClient(source.value, id, false, false);
+            if (!clientResolved) continue;
+            moduleId = path.isAbsolute(clientResolved)
+              ? normalizePath(path.relative(rootDir, clientResolved))
+              : clientResolved;
           } else if (resolved.external === false) {
             moduleId = path.isAbsolute(resolved.id)
               ? normalizePath(path.relative(rootDir, resolved.id))
