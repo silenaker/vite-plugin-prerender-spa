@@ -99,24 +99,6 @@ const optionScenarios: Scenario[] = [
     },
   },
   {
-    name: "options/empty routes: ",
-    options: { routes: [] },
-    sources: { "src/app.ts": STATIC_APP },
-  },
-  {
-    name: "options/route render throws",
-    options: { routes: [...EXAMPLE_ROUTE_PATHS, "/boom"] },
-    sources: {
-      "src/entry-server.ts": `import { render as appRender } from "./app.ts";
-
-export async function render(url: string): Promise<string> {
-  if (url === "/boom") throw new Error("boom-message");
-  return appRender(url);
-}
-`,
-    },
-  },
-  {
     name: "options/missing renderer module",
     options: { routes: ["/"], renderer: "src/does-not-exist" },
     sources: { "src/app.ts": STATIC_APP },
@@ -133,8 +115,33 @@ export async function render(url: string): Promise<string> {
     options: { routes: EXAMPLE_ROUTE_PATHS, containerId: "nope" },
     buildFails: true,
   },
+];
+
+/* -------------------------------------------------------------------------- */
+/*                                   routes                                   */
+/* -------------------------------------------------------------------------- */
+
+const routeScenarios: Scenario[] = [
   {
-    name: "options/async interleaving routes",
+    name: "routes/empty",
+    options: { routes: [] },
+    sources: { "src/app.ts": STATIC_APP },
+  },
+  {
+    name: "routes/render throws",
+    options: { routes: [...EXAMPLE_ROUTE_PATHS, "/boom"] },
+    sources: {
+      "src/entry-server.ts": `import { render as appRender } from "./app.ts";
+
+export async function render(url: string): Promise<string> {
+  if (url === "/boom") throw new Error("boom-message");
+  return appRender(url);
+}
+`,
+    },
+  },
+  {
+    name: "routes/async interleaving",
     options: { routes: ["/one", "/two"] },
     sources: {
       "src/app.ts": `const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -233,13 +240,15 @@ const specifierScenarios: Scenario[] = [
         "/vars-home",
         "/vars-about",
         "/vars-user",
-        "/rel",
-        "/rel-parent",
-        "/abs",
-        "/hook-rel",
-        "/hook-rel-explicit",
-        "/hook-abs",
-        "/hook-abs-explicit",
+        "/extern-rel",
+        "/extern-rel-parent",
+        "/extern-abs",
+        "/extern-hook-rel-default",
+        "/extern-hook-rel-relative",
+        "/extern-hook-rel-absolute",
+        "/extern-hook-abs-default",
+        "/extern-hook-abs-relative",
+        "/extern-hook-abs-absolute",
         "/hook-alias",
         "/https",
         "/http",
@@ -267,19 +276,41 @@ const specifierScenarios: Scenario[] = [
     },
     plugins: [
       externalResolvers([
-        { specifier: "./resolved-relative.js", id: "./resolved-relative.js", external: true },
+        {
+          specifier: "./resolved-relative.js",
+          id: "./resolved-relative.js",
+          external: true,
+        },
         {
           specifier: "./resolved-relative-2.js",
           id: "./resolved-relative-2.js",
           external: "relative",
         },
-        { specifier: "/resolved-absolute.js", id: "/resolved-absolute.js", external: true },
+        {
+          specifier: "./resolved-relative-3.js",
+          id: "./resolved-relative-3.js",
+          external: "absolute",
+        },
+        {
+          specifier: "/resolved-absolute.js",
+          id: "/resolved-absolute.js",
+          external: true,
+        },
         {
           specifier: "/resolved-absolute-2.js",
           id: "/resolved-absolute-2.js",
+          external: "relative",
+        },
+        {
+          specifier: "/resolved-absolute-3.js",
+          id: "/resolved-absolute-3.js",
           external: "absolute",
         },
-        { specifier: "./source-alias.js", id: "/alias-target.js", external: true },
+        {
+          specifier: "./source-alias.js",
+          id: "/alias-target.js",
+          external: true,
+        },
       ]),
     ],
     sources: {
@@ -287,13 +318,15 @@ const specifierScenarios: Scenario[] = [
         "/home": ["./pages/home"],
         "/about": ["./pages/about"],
         "/user": ["./pages/user"],
-        "/rel": ["./rel-external.js"],
-        "/rel-parent": ["../rel-parent-external.js"],
-        "/abs": ["/abs-external.js"],
-        "/hook-rel": ["./resolved-relative.js"],
-        "/hook-rel-explicit": ["./resolved-relative-2.js"],
-        "/hook-abs": ["/resolved-absolute.js"],
-        "/hook-abs-explicit": ["/resolved-absolute-2.js"],
+        "/extern-rel": ["./rel-external.js"],
+        "/extern-rel-parent": ["../rel-parent-external.js"],
+        "/extern-abs": ["/abs-external.js"],
+        "/extern-hook-rel-default": ["./resolved-relative.js"],
+        "/extern-hook-rel-relative": ["./resolved-relative-2.js"],
+        "/extern-hook-rel-absolute": ["./resolved-relative-3.js"],
+        "/extern-hook-abs-default": ["/resolved-absolute.js"],
+        "/extern-hook-abs-relative": ["/resolved-absolute-2.js"],
+        "/extern-hook-abs-absolute": ["/resolved-absolute-3.js"],
         "/hook-alias": ["./source-alias.js"],
         "/https": ["https://cdn.example.com/lib.js"],
         "/http": ["http://cdn.example.com/lib.js"],
@@ -337,32 +370,91 @@ export async function renderVars(url: string): Promise<string> {
   },
   {
     name: "specifier/relative externals",
-    options: { routes: ["/rel", "/abs", "/hook-abs"] },
+    options: {
+      routes: [
+        "/extern-rel",
+        "/extern-rel-parent",
+        "/extern-abs",
+        "/extern-hook-rel-default",
+        "/extern-hook-abs-default",
+      ],
+    },
     vite: {
       build: {
         rollupOptions: {
-          external: ["./rel-external.js", "/abs-external.js"],
+          external: ["./rel-external.js", "../rel-parent-external.js", "/abs-external.js"],
           makeAbsoluteExternalsRelative: true,
         },
       },
     },
     plugins: [
       externalResolvers([
-        { specifier: "/resolved-absolute.js", id: "/resolved-absolute.js", external: true },
+        {
+          specifier: "./resolved-relative.js",
+          id: "./resolved-relative.js",
+          external: true,
+        },
+        {
+          specifier: "/resolved-absolute.js",
+          id: "/resolved-absolute.js",
+          external: true,
+        },
       ]),
     ],
     sources: {
       "src/app.ts": router({
-        "/rel": ["./rel-external.js"],
-        "/abs": ["/abs-external.js"],
-        "/hook-abs": ["/resolved-absolute.js"],
+        "/extern-rel": ["./rel-external.js"],
+        "/extern-rel-parent": ["../rel-parent-external.js"],
+        "/extern-abs": ["/abs-external.js"],
+        "/extern-hook-rel-default": ["./resolved-relative.js"],
+        "/extern-hook-abs-default": ["/resolved-absolute.js"],
       }),
+    },
+  },
+];
+
+/* -------------------------------------------------------------------------- */
+/*                           nested dynamic imports                           */
+/* -------------------------------------------------------------------------- */
+
+const nestedScenarios: Scenario[] = [
+  {
+    name: "nested/deep chain",
+    options: { routes: ["/deep"] },
+    sources: {
+      "src/app.ts": `export async function render(): Promise<string> {
+  const { default: renderLevel1 } = await import("./deep/level1.ts");
+  return renderLevel1();
+}
+`,
+      "src/deep/level1.ts": `export default async function renderLevel1(): Promise<string> {
+  const { default: renderLevel2 } = await import("./level2.ts");
+  return \`<div data-level="1">\${await renderLevel2()}</div>\`;
+}
+`,
+      "src/deep/level2.ts": `export default async function renderLevel2(): Promise<string> {
+  const { default: renderLevel3 } = await import("./level3.ts");
+  return \`<div data-level="2">\${await renderLevel3()}</div>\`;
+}
+`,
+      "src/deep/level3.ts": `import { leaf } from "./leaf.ts";
+
+export default function renderLevel3(): string {
+  return \`<div data-level="3">\${leaf()}</div>\`;
+}
+`,
+      "src/deep/leaf.ts": `export function leaf(): string {
+  return "leaf";
+}
+`,
     },
   },
 ];
 
 export const groups: Array<{ name: string; scenarios: Scenario[] }> = [
   { name: "plugin options", scenarios: optionScenarios },
+  { name: "routes", scenarios: routeScenarios },
   { name: "vite config", scenarios: viteConfigScenarios },
   { name: "dynamic import module specifiers", scenarios: specifierScenarios },
+  { name: "nested dynamic imports", scenarios: nestedScenarios },
 ];
